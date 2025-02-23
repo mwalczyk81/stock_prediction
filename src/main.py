@@ -2,154 +2,141 @@ import argparse
 import logging
 import os
 import pandas as pd
-import concurrent.futures
-from rich.progress import Progress
-from datetime import datetime, timedelta
-import colorlog
-from typing import Any
+import torch
+import sys
 
+from rich.console import Console
+from rich.logging import RichHandler
+from datetime import datetime, timedelta
+from rich.progress import Progress
+from typing import Any, Tuple
+from src.logger import logger
 from src.data.data_fetcher import fetch_stock_data
 from src.data.preprocessing import create_features_targets
 from src.models.random_forest import train_random_forest
 from src.models.xgboost_model import train_xgboost
-from src.utils.visualization import plot_predictions
-from src.forecasting import forecast_one_step, forecast_multi_step
-
-from src.models.lstm import prepare_lstm_data, build_lstm_model, train_lstm_model
+from src.models.lstm import prepare_lstm_data, train_lstm_model
+from src.models.lstm_tuner import tune_lstm_hyperparameters
+from src.forecasting import forecast_one_step, forecast_multi_step, forecast_one_step_lstm
 from sklearn.metrics import mean_squared_error
 
-# Suppress TensorFlow logging
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# Configure colored logging with colorlog
-handler = colorlog.StreamHandler()
-handler.setFormatter(colorlog.ColoredFormatter(
-    '%(log_color)s%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    log_colors={
-        'DEBUG':    'cyan',
-        'INFO':     'green',
-        'WARNING':  'yellow',
-        'ERROR':    'red',
-        'CRITICAL': 'red,bg_white',
-    }
-))
-logger = colorlog.getLogger()
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+progress_console = Console(file=sys.stdout)
 
-def main(args: Any) -> None:
-    ticker = args.ticker
-    start_date = args.start_date
-    end_date = args.end_date
-    horizon = args.horizon
-    model_type = args.model_type
-    forecast_steps = args.forecast_steps
+# **✅ Function to Load or Fetch Stock Data**
+def load_or_fetch_data(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """Loads stock data from CSV if available, otherwise fetches it."""
+    csv_file = f"data/raw/{ticker}_stock_data.csv"
 
-    logger.info(f"Processing {ticker}...")
-    data = fetch_stock_data(ticker, start_date, end_date)
-    if data is None or data.empty:
-        logger.error("No data fetched. Exiting...")
-        return
+    if os.path.exists(csv_file):
+        logger.info(f"Loading stock data from CSV: {csv_file}")
+        return pd.read_csv(csv_file, index_col=0, parse_dates=True)
 
-    logger.info("Creating features and target...")
-    features, target = create_features_targets(data, horizon=horizon)
-    
-    logger.info(f"Training {model_type} model...")
+    logger.info(f"Fetching stock data for {ticker} from {start_date} to {end_date}...")
+    return fetch_stock_data(ticker, start_date, end_date, save_to_csv=True)
+
+
+# **✅ Function to Train the Model with Progress Bar**
+def train_model(model_type: str, features: pd.DataFrame, target: pd.Series, data, progress: Progress) -> Tuple[Any, pd.DataFrame, pd.Series, Any, float]:
+    """Trains the selected model (Random Forest, XGBoost, or LSTM) with a progress bar."""
+
     if model_type.lower() == "rf":
+        logger.info("Training Random Forest model...")
         model, X_test, y_test, predictions, mse = train_random_forest(features, target)
-        predictions = predictions.flatten()
-        test_df = X_test.copy()
-        test_df['Predicted_Price'] = test_df['Close'] * (1 + predictions)
-        test_df['Actual_Price'] = test_df['Close'] * (1 + y_test)
-        avg_volatility = X_test['Volatility'].mean() if 'Volatility' in X_test.columns else 1.0
 
     elif model_type.lower() == "xgb":
+        logger.info("Training XGBoost model...")
         model, X_test, y_test, predictions, mse = train_xgboost(features, target)
-        predictions = predictions.flatten()
-        test_df = X_test.copy()
-        test_df['Predicted_Price'] = test_df['Close'] * (1 + predictions)
-        test_df['Actual_Price'] = test_df['Close'] * (1 + y_test)
-        avg_volatility = X_test['Volatility'].mean() if 'Volatility' in X_test.columns else 1.0
 
     elif model_type.lower() == "lstm":
-        # For LSTM, use the 'Close' column to prepare a sequence.
-        sequence_length = 60  # Must match the model input shape
-        # Instead of using create_features_targets, use the raw price data.
-        # Note: You might still use your engineered features for training,
-        # but for forecasting, you need a sequence.
-        # Here, we assume 'data' already contains the historical prices.
-        
-        # Build and train the LSTM model as before:
+        logger.info("Preparing LSTM data...")
+        sequence_length = 60
         close_series = features['Close']
         X_seq, y_seq, scaler = prepare_lstm_data(close_series, sequence_length=sequence_length)
         train_size = int(len(X_seq) * 0.8)
         X_train, X_test = X_seq[:train_size], X_seq[train_size:]
         y_train, y_test = y_seq[:train_size], y_seq[train_size:]
-        model = build_lstm_model(input_shape=(X_train.shape[1], X_train.shape[2]))
-        train_lstm_model(model, X_train, y_train, epochs=50, batch_size=32)
-        predictions = model.predict(X_test).flatten()  # Evaluate on historical test set for MSE
-        mse = mean_squared_error(y_test, predictions)
+
+        logger.info("Tuning LSTM hyperparameters...")
         
-        # For forward forecasting, call our new function:
-        from src.forecasting import forecast_one_step_lstm
-        predicted_return, predicted_price = forecast_one_step_lstm(model, data, sequence_length=sequence_length, horizon=horizon)
+        best_model, best_hps = tune_lstm_hyperparameters(
+            X_train.to('cuda'), y_train.to('cuda'), data, progress=progress
+        )
         
-        logger.info(f"Forward Forecast for {ticker}: Predicted return over {horizon} days = {predicted_return:.4f}, Predicted price = {predicted_price:.2f}")
+        logger.info(f"Best LSTM Hyperparameters: {best_hps}")
+
+        logger.info("Training LSTM model with best hyperparameters...")
         
-        # For visualization purposes, you can still reconstruct a test_df for historical evaluation:
-        close_values = X_test[:, -1, 0]
-        test_df = pd.DataFrame({'Close': close_values})
-        y_test = y_test.flatten()
-        test_df['Predicted_Price'] = test_df['Close'] * (1 + predictions)
-        test_df['Actual_Price'] = test_df['Close'] * (1 + y_test)
-        avg_volatility = 1.0  # Default or computed from another method
+        best_model = train_lstm_model(
+            best_model, X_train.to('cuda'), y_train.to('cuda'),
+            epochs=100, batch_size=best_hps['batch_size'], progress=progress
+        )
+
+        best_model.eval()
+        with torch.no_grad():
+            predictions = best_model(X_test.to('cuda')).squeeze().cpu().numpy()
+
+        mse = mean_squared_error(y_test.cpu(), predictions)
+        return best_model, X_test, y_test, predictions, mse
+
     else:
         logger.error(f"Unknown model type: {model_type}")
-        return
+        raise ValueError(f"Unsupported model type: {model_type}")
 
-    logger.info(f"{ticker} - Model MSE: {mse}")
-    avg_predicted_return = predictions.mean()
-    last_predicted_return = predictions[-1]
-    risk_adjusted_return = last_predicted_return / avg_volatility if avg_volatility != 0 else 0
+    return model, X_test, y_test, predictions, mse
 
-    # If forecast_steps is specified, perform forward forecasting.
+
+# **✅ Main Function with Improved Progress Bar Handling**
+def main(args: Any) -> None:
+    """Main function to run stock prediction and forecasting with proper progress bar handling."""
+    ticker, start_date, end_date, horizon, model_type, forecast_steps = args.ticker, args.start_date, args.end_date, args.horizon, args.model_type, args.forecast_steps
+
+    logger.info(f"Starting stock prediction for {ticker}, model: {model_type.upper()}, horizon: {horizon} days.")
+
+    with Progress(console=progress_console, transient=True) as progress:
+        # **Task 1: Fetching Stock Data**
+        data = load_or_fetch_data(ticker, start_date, end_date)
+        if data.empty:
+            logger.error("No data fetched or loaded. Aborting.")
+            return
+
+        # **Task 2: Creating Features and Target**
+        features, target = create_features_targets(data, horizon=horizon)
+
+        # **Task 3: Training Model**
+        model, X_test, y_test, predictions, mse = train_model(model_type, features, target, data, progress)
+
+    logger.info(f"{ticker} - {model_type.upper()} Model Training Completed. MSE: {mse:.6f}")
+    current_price = data['Close'].iloc[-1]
+
+    # **Forecasting Logic**
     if forecast_steps > 0:
-        from src.forecasting import forecast_one_step_lstm, forecast_multi_step
+        logger.info(f"Performing {forecast_steps}-step forward forecast...")
         if model_type.lower() == "lstm":
-            # Call the dedicated LSTM forecasting function.
-            pred_return, pred_price = forecast_one_step_lstm(model, data, sequence_length=60, horizon=horizon)
-            logger.info(f"Forward Forecast for {ticker}: Predicted return over {horizon} days = {pred_return:.4f}, Predicted price = {pred_price:.2f}")
+            pred_return, pred_price = forecast_one_step_lstm(model, data, features['Close'], sequence_length=60, horizon=horizon)
         else:
             if forecast_steps == 1:
                 pred_return, pred_price = forecast_one_step(model, data, horizon)
-                logger.info(f"One-step forecast: Predicted {horizon}-day return: {pred_return:.4f}, Predicted price: {pred_price:.2f}")
             else:
                 forecasts = forecast_multi_step(model, data, horizon, forecast_steps)
-                logger.info("Multi-step forecasts:")
                 for forecast in forecasts:
                     logger.info(f"Step {forecast['step']}: Predicted return: {forecast['predicted_return']:.4f}, Predicted price: {forecast['predicted_price']:.2f}")
-
+                return
     else:
-        # Otherwise, plot historical test predictions.
-        test_dates = data.iloc[-len(test_df):].index
-        logger.info("Plotting predictions...")
-        plot_predictions(test_dates, test_df['Actual_Price'], test_df['Predicted_Price'],
-                         title=f"{ticker} Stock Price Prediction")
+        pred_return, pred_price = forecast_one_step_lstm(model, data, features['Close'], sequence_length=60, horizon=horizon) if model_type.lower() == "lstm" else forecast_one_step(model, data, horizon)
 
+    logger.info(f"Forward Forecast for {ticker} ({model_type.upper()}): Current price = {current_price:.2f}, Predicted return over {horizon} days = {pred_return:.4f}, Predicted price = {pred_price:.2f}")
+
+
+# **✅ Entry Point**
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run stock prediction for a single stock with optional forward forecasting.")
-    parser.add_argument("--ticker", type=str, default="AAPL",
-                        help="Ticker symbol of the stock (default: AAPL)")
-    parser.add_argument("--start_date", type=str, default=(datetime.today() - timedelta(days=365*10)).strftime("%Y-%m-%d"),
-                        help="Start date for historical data (default: 10 years ago)")
-    parser.add_argument("--end_date", type=str, default=datetime.today().strftime("%Y-%m-%d"),
-                        help="End date for historical data (default: today's date)")
-    parser.add_argument("--horizon", type=int, default=20,
-                        help="Prediction horizon in days (default: 20)")
-    parser.add_argument("--model_type", type=str, default="rf",
-                        help="Model type to use (rf, xgb, or lstm; default: rf)")
-    parser.add_argument("--forecast_steps", type=int, default=0,
-                        help="Number of future steps to forecast (0 means no forward forecast)")
+    parser = argparse.ArgumentParser(description="Run stock prediction with optional forecasting.")
+    parser.add_argument("--ticker", type=str, default="AAPL")
+    parser.add_argument("--start_date", type=str, default=(datetime.today() - timedelta(days=365*10)).strftime("%Y-%m-%d"))
+    parser.add_argument("--end_date", type=str, default=datetime.today().strftime("%Y-%m-%d"))
+    parser.add_argument("--horizon", type=int, default=20)
+    parser.add_argument("--model_type", type=str, default="rf")
+    parser.add_argument("--forecast_steps", type=int, default=0)
+
     args = parser.parse_args()
     main(args)

@@ -1,4 +1,3 @@
-# tests/test_modules.py
 import unittest
 import pandas as pd
 from src.data.preprocessing import add_technical_indicators, create_features_targets

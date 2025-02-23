@@ -169,3 +169,6 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+/lstm_tuning/stock_forecast
+/.vs/stock_prediction/CopilotIndices/0.2.1657.32929
+/.vs

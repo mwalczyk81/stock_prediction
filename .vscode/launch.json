@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run stock prediction",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "src.main",
+            "args": [
+                "--ticker", "F",
+                "--model_type", "lstm",
+                "--forecast_steps", "1"
+            ],
+            "console": "integratedTerminal"
+        }
+    ]
+}
