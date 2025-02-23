@@ -1,4 +1,3 @@
-from sklearn.discriminant_analysis import StandardScaler
 from src.data.preprocessing import create_features_targets
 import pandas as pd
 import numpy as np
