@@ -132,7 +132,7 @@ def main(args: Any) -> None:
 
         features, target = create_features_targets(data, horizon=horizon)
 
-        model, X_test, y_test, predictions, mse = train_model(model_type, features, target, data, progress)
+        model, _, _, _, mse = train_model(model_type, features, target, data, progress)
 
     logger.info(f"{ticker} - {model_type.upper()} Model Training Completed. MSE: {mse:.6f}")
     current_price = data['Close'].iloc[-1]

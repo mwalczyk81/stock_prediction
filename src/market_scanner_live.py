@@ -79,7 +79,7 @@ def analyze_stock(ticker: str, start_date: str, end_date: str,
         elif model_type.lower() == "lstm":
             sequence_length = 60
             close_series = features['Close']
-            X_seq, y_seq, scaler = prepare_lstm_data(close_series, sequence_length=sequence_length)
+            X_seq, y_seq, _ = prepare_lstm_data(close_series, sequence_length=sequence_length)
             train_size = int(len(X_seq) * 0.8)
             X_train, X_test = X_seq[:train_size], X_seq[train_size:]
             y_train, y_test = y_seq[:train_size], y_seq[train_size:]
