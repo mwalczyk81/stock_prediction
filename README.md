@@ -2,6 +2,8 @@
 
 This project uses AI and machine learning to predict stock prices and provide actionable buy/sell recommendations. It leverages historical data from Yahoo Finance, technical indicators, and machine learning models—including RandomForest and XGBoost—to analyze stocks over a multi-day horizon. Additional features such as volatility and momentum are incorporated to refine predictions and compute risk-adjusted returns.
 
+This is just for fun and my own learning.....it is probably wrong so do not take advice from it!
+
 ## Directory Structure
 
 - **data/**: Contains raw and processed stock data.
