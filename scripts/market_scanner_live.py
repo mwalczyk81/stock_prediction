@@ -15,7 +15,7 @@ from src.data.preprocessing import create_features_targets
 from src.models.random_forest import train_random_forest
 from src.models.xgboost_model import train_xgboost
 from src.models.lstm import prepare_lstm_data, LSTMPredictor, train_lstm_model
-from src.logger import logger
+from src.utils.logger import logger
 
 # Use a Rich Console for progress output
 progress_console = Console(file=sys.stdout)

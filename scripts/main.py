@@ -12,8 +12,8 @@ from typing import Any, Tuple
 
 from src.data.data_fetcher import fetch_stock_data
 from src.data.preprocessing import create_features_targets
-from src.forecasting import forecast_one_step, forecast_multi_step, forecast_one_step_lstm
-from src.logger import logger
+from src.forecasting.forecasting import forecast_one_step, forecast_multi_step, forecast_one_step_lstm
+from src.utils.logger import logger
 from src.models.random_forest import train_random_forest
 from src.models.lstm import prepare_lstm_data, train_lstm_model
 from src.models.lstm_tuner import tune_lstm_hyperparameters

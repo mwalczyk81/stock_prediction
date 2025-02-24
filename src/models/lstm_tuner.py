@@ -8,7 +8,7 @@ from rich.progress import Progress
 from torch.utils.data import DataLoader, TensorDataset
 from typing import Tuple
 
-from src.logger import logger
+from src.utils.logger import logger
 
 # Disable default Optuna logging to prevent excessive output
 optuna.logging.disable_default_handler()

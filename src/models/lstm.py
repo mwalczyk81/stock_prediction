@@ -4,7 +4,7 @@ import torch.optim as optim
 import numpy as np
 
 from rich.progress import Progress
-from src.logger import logger
+from src.utils.logger import logger
 from sklearn.preprocessing import MinMaxScaler
 from torch.utils.data import TensorDataset, DataLoader
 from typing import Tuple

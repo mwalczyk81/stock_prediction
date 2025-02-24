@@ -2,7 +2,7 @@ import pandas as pd
 import yfinance as yf
 
 from typing import Optional
-from src.logger import logger
+from src.utils.logger import logger
 
 def fetch_stock_data(ticker: str, start_date: str, end_date: str, save_to_csv: bool = False, filename: Optional[str] = None) -> Optional[pd.DataFrame]:
     """Fetch historical stock data for a given ticker symbol.

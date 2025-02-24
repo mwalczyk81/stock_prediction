@@ -5,7 +5,7 @@
             "name": "Run stock prediction",
             "type": "debugpy",
             "request": "launch",
-            "module": "src.main",
+            "module": "scripts.main",
             "args": [
                 "--ticker", "F",
                 "--model_type", "lstm",
