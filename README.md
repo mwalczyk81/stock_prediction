@@ -8,18 +8,22 @@ This is just for fun and my own learning.....it is probably wrong so do not take
 
 - **data/**: Contains raw and processed stock data.
 - **notebooks/**: Jupyter notebooks for data exploration and prototyping.
+- **scripts/**: Main scripts to run the project
+    - `main.py`: Main script for running an end-to-end pipeline for a single stock.
+    - `market_scanner_live.py`: Scans the market, ranks stocks by predicted and risk-adjusted returns, and provides recommendations.
 - **src/**: Source code organized into:
   - **data/**: Data fetching and preprocessing modules.
     - `data_fetcher.py`: Downloads stock data using yfinance.
     - `preprocessing.py`: Cleans data and generates features (technical indicators, lag features, volatility, and momentum).
+  - **forecasting/**: Forecasting scripts
+    - `forecasting.py` Forecasts one or more steps ahead 
   - **models/**: Model training modules.
     - `random_forest.py`: Trains a RandomForest model.
     - `xgboost_model.py`: Trains an XGBoost model.
     - `lstm.py`: Builds and trains an LSTM network (optional).
   - **utils/**: Utility functions.
     - `visualization.py`: Contains functions for plotting predictions.
-  - `main.py`: Main script for running an end-to-end pipeline for a single stock.
-  - `market_scanner_live.py`: Scans the market, ranks stocks by predicted and risk-adjusted returns, and provides recommendations.
+    - `logger.py`: Logger setup
 - **tests/**: Unit and integration tests.
 - **market_tickers.csv**: A CSV file with a list of stock tickers (with a column named "Ticker").
 - **requirements.txt**: Project dependencies.
