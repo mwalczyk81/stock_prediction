@@ -7,6 +7,7 @@ This is just for fun and my own learning.....it is probably wrong so do not take
 ## Directory Structure
 
 - **data/**: Contains raw and processed stock data.
+  - **market_tickers.csv**: A CSV file with a list of stock tickers (with a column named "Ticker").
 - **notebooks/**: Jupyter notebooks for data exploration and prototyping.
 - **scripts/**: Main scripts to run the project
     - `main.py`: Main script for running an end-to-end pipeline for a single stock.
@@ -25,7 +26,6 @@ This is just for fun and my own learning.....it is probably wrong so do not take
     - `visualization.py`: Contains functions for plotting predictions.
     - `logger.py`: Logger setup
 - **tests/**: Unit and integration tests.
-- **market_tickers.csv**: A CSV file with a list of stock tickers (with a column named "Ticker").
 - **requirements.txt**: Project dependencies.
 - **README.md**: Project documentation.
 

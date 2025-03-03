@@ -1,23 +1,30 @@
-import sys
 import logging
-import colorlog
+
+from rich.console import Console
+from rich.logging import RichHandler
+
 
 def setup_logger() -> logging.Logger:
-    """Sets up a global colored logger."""
-    # Direct log messages to stderr
-    handler = colorlog.StreamHandler(sys.stderr)
-    handler.setFormatter(colorlog.ColoredFormatter(
-        '%(log_color)s%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        log_colors={'DEBUG': 'cyan', 'INFO': 'green', 'WARNING': 'yellow', 'ERROR': 'red', 'CRITICAL': 'red,bg_white'}
-    ))
+    handler = RichHandler(rich_tracebacks=True)
 
-    logger = colorlog.getLogger("stock_prediction")
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
+    handler.setFormatter(formatter)
+
+    logger = logging.getLogger("pr_analysis")
+
     if not logger.handlers:
         logger.addHandler(handler)
+
         logger.setLevel(logging.INFO)
+
+        logger.propagate = False  # Prevent double logging.
 
     return logger
 
-# Global logger instance
+
 logger = setup_logger()
+
+console = Console()

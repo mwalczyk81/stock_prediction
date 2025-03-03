@@ -1,18 +1,19 @@
+from typing import Tuple
+
 import numpy as np
 import optuna
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
 from rich.progress import Progress
 from torch.utils.data import DataLoader, TensorDataset
-from typing import Tuple
 
 from src.utils.logger import logger
 
 # Disable default Optuna logging to prevent excessive output
 optuna.logging.disable_default_handler()
 optuna.logging.enable_propagation()
+
 
 class LSTMPredictor(nn.Module):
     """LSTM model for time series forecasting.
@@ -30,9 +31,15 @@ class LSTMPredictor(nn.Module):
     def __init__(self, input_size=1, hidden_size=50, num_layers=2, dropout=0.2):
         super(LSTMPredictor, self).__init__()
         self.lstm = nn.LSTM(
-            input_size, hidden_size, num_layers, batch_first=True, 
-            dropout=dropout if num_layers > 1 else 0  # Avoid dropout for a single-layer LSTM
+            input_size,
+            hidden_size,
+            num_layers,
+            batch_first=True,
+            dropout=dropout
+            if num_layers > 1
+            else 0,  # Avoid dropout for a single-layer LSTM
         )
+        self.dropout_layer = nn.Dropout(dropout)
         self.fc = nn.Linear(hidden_size, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -45,9 +52,18 @@ class LSTMPredictor(nn.Module):
             torch.Tensor: The model output, representing the predicted value for the next time step.
         """
         lstm_out, _ = self.lstm(x)
-        return self.fc(lstm_out[:, -1, :])  # Use last LSTM output
+        lstm_out = lstm_out[:, -1, :]
+        lstm_out = self.dropout_layer(lstm_out)
+        return self.fc(lstm_out)
 
-def objective(trial: optuna.Trial, X_train: torch.Tensor, y_train: torch.Tensor, data: np.ndarray, device: str) -> float:
+
+def objective(
+    trial: optuna.Trial,
+    X_train: torch.Tensor,
+    y_train: torch.Tensor,
+    data: np.ndarray,
+    device: str,
+) -> float:
     """Defines the hyperparameter search objective for Optuna.
 
     This function defines the range of hyperparameters to search, trains the LSTM model for a
@@ -67,7 +83,7 @@ def objective(trial: optuna.Trial, X_train: torch.Tensor, y_train: torch.Tensor,
         float: The average validation loss (MSE) for the given hyperparameters.
     """
 
-    latest_price = data['Close'].iloc[-1]
+    latest_price = data["Close"].iloc[-1]
     logger.debug(f"Using latest price from data: {latest_price}")
 
     # Define hyperparameter search space
@@ -78,12 +94,15 @@ def objective(trial: optuna.Trial, X_train: torch.Tensor, y_train: torch.Tensor,
     batch_size = trial.suggest_categorical("batch_size", [16, 32, 64])
 
     # Prepare dataset
-    train_dataset = TensorDataset(X_train.clone().detach().float(), 
-                                  y_train.clone().detach().float())
+    train_dataset = TensorDataset(
+        X_train.clone().detach().float(), y_train.clone().detach().float()
+    )
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
     # Initialize model
-    model = LSTMPredictor(input_size=1, hidden_size=hidden_size, num_layers=num_layers, dropout=dropout).to(device)
+    model = LSTMPredictor(
+        input_size=1, hidden_size=hidden_size, num_layers=num_layers, dropout=dropout
+    ).to(device)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -102,7 +121,9 @@ def objective(trial: optuna.Trial, X_train: torch.Tensor, y_train: torch.Tensor,
 
         avg_loss = total_loss / len(train_loader)
         if epoch % 10 == 0:
-            logger.debug(f"Trial {trial.number}, Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.6f}")
+            logger.debug(
+                f"Trial {trial.number}, Epoch {epoch + 1}/{num_epochs}, Loss: {avg_loss:.6f}"
+            )
 
         # Report and check for pruning
         trial.report(avg_loss, epoch)
@@ -111,8 +132,14 @@ def objective(trial: optuna.Trial, X_train: torch.Tensor, y_train: torch.Tensor,
 
     return avg_loss
 
-def tune_lstm_hyperparameters(X_train: torch.Tensor, y_train: torch.Tensor, data: np.ndarray, n_trials: int = 10, 
-                              progress: Progress = None) -> Tuple[nn.Module, dict]:
+
+def tune_lstm_hyperparameters(
+    X_train: torch.Tensor,
+    y_train: torch.Tensor,
+    data: np.ndarray,
+    n_trials: int = 10,
+    progress: Progress = None,
+) -> Tuple[nn.Module, dict]:
     """Tunes LSTM hyperparameters using Optuna with a shared progress bar if provided.
 
     This function runs an Optuna study to find the best LSTM hyperparameters for time series forecasting.
@@ -161,9 +188,11 @@ def tune_lstm_hyperparameters(X_train: torch.Tensor, y_train: torch.Tensor, data
     logger.info(f"Best Hyperparameters: {best_hps}")
 
     # Create the best model using optimal hyperparameters
-    best_model = LSTMPredictor(input_size=1,
-                               hidden_size=best_hps["hidden_size"],
-                               num_layers=best_hps["num_layers"],
-                               dropout=best_hps["dropout"]).to(device)
+    best_model = LSTMPredictor(
+        input_size=1,
+        hidden_size=best_hps["hidden_size"],
+        num_layers=best_hps["num_layers"],
+        dropout=best_hps["dropout"],
+    ).to(device)
 
     return best_model, best_hps

@@ -1,24 +1,20 @@
 import argparse
 import concurrent.futures
-import pandas as pd
-import sys
-import torch
-
 from datetime import datetime, timedelta
-from rich.console import Console
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
+import torch
 from rich.progress import Progress
 from sklearn.metrics import mean_squared_error
-from typing import Any, Dict, List, Optional
 
 from src.data.data_fetcher import fetch_stock_data
 from src.data.preprocessing import create_features_targets
+from src.models.lstm import prepare_lstm_data, train_lstm_model
+from src.models.lstm_tuner import tune_lstm_hyperparameters
 from src.models.random_forest import train_random_forest
 from src.models.xgboost_model import train_xgboost
-from src.models.lstm import prepare_lstm_data, LSTMPredictor, train_lstm_model
 from src.utils.logger import logger
-
-# Use a Rich Console for progress output
-progress_console = Console(file=sys.stdout)
 
 
 def load_ticker_list(filepath: str = "data/raw/market_tickers.csv") -> List[str]:
@@ -31,29 +27,23 @@ def load_ticker_list(filepath: str = "data/raw/market_tickers.csv") -> List[str]
         List[str]: A list of stock ticker symbols.
     """
     df = pd.read_csv(filepath)
-    return df['Ticker'].tolist()
+    return df["Ticker"].tolist()
 
 
-def analyze_stock(ticker: str, start_date: str, end_date: str, 
-                  model_type: str, horizon: int, progress: Progress) -> Optional[Dict[str, Any]]:
-    """Analyzes stock data for a given ticker using different prediction models.
-
-    This function:
-    - Fetches historical stock data.
-    - Prepares features and target variables.
-    - Trains a selected model (Random Forest, XGBoost, or LSTM).
-    - Computes prediction errors and returns performance metrics.
-
-    Args:
-        ticker (str): The stock ticker symbol.
-        start_date (str): The start date for data retrieval in YYYY-MM-DD format.
-        end_date (str): The end date for data retrieval in YYYY-MM-DD format.
-        model_type (str): The type of model to use ('rf', 'xgb', or 'lstm').
-        horizon (int): The forecast horizon (in days).
-        progress (Progress): A Rich Progress instance for tracking progress.
-
-    Returns:
-        Optional[Dict[str, Any]]: A dictionary containing the model's evaluation metrics and predictions, or None if an error occurs.
+def analyze_stock(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    model_type: str,
+    horizon: int,
+    progress: Progress,
+) -> Optional[Dict[str, Any]]:
+    """
+    Analyzes stock data for a given ticker using the same logic as main.py:
+    - Fetch/load data
+    - Create features/target
+    - If LSTM, do hyperparameter tuning, train with best HP, and optionally do multiple runs
+    - Compute and return metrics
     """
     try:
         progress.console.log(f"[{ticker}] Starting analysis.")
@@ -63,101 +53,111 @@ def analyze_stock(ticker: str, start_date: str, end_date: str,
             return None
 
         progress.console.log(f"[{ticker}] Data fetched ({len(data)} rows).")
+
         features, target = create_features_targets(data, horizon=horizon)
-        progress.console.log(f"[{ticker}] Features and target created.")
+        progress.console.log(
+            f"[{ticker}] Created features/target for horizon={horizon}."
+        )
 
-        if model_type.lower() == "rf":
-            model, X_test, y_test, predictions, mse = train_random_forest(features, target)
-            test_df = X_test.copy()
-            avg_volatility = X_test['Volatility'].mean() if 'Volatility' in X_test.columns else 1.0
+        # Decide how to handle models
+        if model_type.lower() in ["rf", "xgb"]:
+            # For example, re-use your existing train_random_forest() or train_xgboost() from main.py
+            if model_type.lower() == "rf":
+                model, X_test, y_test, predictions, mse_val = train_random_forest(
+                    features, target
+                )
+            else:
+                model, X_test, y_test, predictions, mse_val = train_xgboost(
+                    features, target
+                )
 
-        elif model_type.lower() == "xgb":
-            model, X_test, y_test, predictions, mse = train_xgboost(features, target)
-            test_df = X_test.copy()
-            avg_volatility = X_test['Volatility'].mean() if 'Volatility' in X_test.columns else 1.0
+            # Suppose we just do last predictions from X_test
+            # (You could do a “forward forecast” if you want.)
+            last_return = predictions[-1]
+            risk_adjusted_return = last_return / (X_test["Volatility"].mean() or 1.0)
 
         elif model_type.lower() == "lstm":
+            # Recreate the logic from main.py
             sequence_length = 60
-            close_series = features['Close']
-            X_seq, y_seq, _ = prepare_lstm_data(close_series, sequence_length=sequence_length)
+            close_series = features["Close"]
+            X_seq, y_seq, _ = prepare_lstm_data(close_series, sequence_length)
+
             train_size = int(len(X_seq) * 0.8)
             X_train, X_test = X_seq[:train_size], X_seq[train_size:]
             y_train, y_test = y_seq[:train_size], y_seq[train_size:]
 
-            # Create LSTM model instance
-            model = LSTMPredictor(input_size=1, hidden_size=100, num_layers=2, dropout=0.2)
-            
-            # Train the model; use a shared progress bar if desired
-            train_lstm_model(model, X_train, y_train, epochs=50, batch_size=32, progress=progress, ticker=ticker)
-            
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            model.to(device)
-            model.eval()
-            with torch.no_grad():
-                predictions = model(X_test.to(device)).cpu().numpy().flatten()
+            # 1) Hyperparameter Tuning
+            best_model, best_hps = tune_lstm_hyperparameters(
+                X_train.to("cuda"), y_train.to("cuda"), data, progress=progress
+            )
+            progress.console.log(f"[{ticker}] Best LSTM Hyperparams: {best_hps}")
 
-            mse = mean_squared_error(y_test.cpu().numpy(), predictions)
-            
-            # Extract last value from input sequences for reference price
-            close_values = X_test[:, -1, 0].cpu().numpy() if isinstance(X_test, torch.Tensor) else X_test[:, -1, 0]
-            test_df = pd.DataFrame({'Close': close_values})
-            test_df['Predicted_Price'] = test_df['Close'] * (1 + predictions)
-            test_df['Actual_Price'] = test_df['Close'] * (1 + (y_test.cpu().numpy().flatten() if isinstance(y_test, torch.Tensor) else y_test.flatten()))
-            avg_volatility = 1.0
+            # 2) Train LSTM with best hyperparams
+            best_model = train_lstm_model(
+                best_model,
+                X_train.to("cuda"),
+                y_train.to("cuda"),
+                epochs=100,
+                batch_size=best_hps["batch_size"],
+                progress=progress,
+                ticker=ticker,
+            )
+
+            # 3) Evaluate model MSE on test set
+            best_model.eval()
+            with torch.no_grad():
+                preds = best_model(X_test.to("cuda")).squeeze().cpu().numpy()
+            mse_val = mean_squared_error(y_test.cpu().numpy(), preds)
+
+            # For "risk" or predicted return, you can do single-step or multiple runs
+            # For demonstration, let's do a single-step forecast (like main.py)
+            last_return = float(preds[-1])  # last test prediction
+            risk_adjusted_return = last_return  # or scale by volatility, if you like
 
         else:
             logger.error(f"[{ticker}] Unknown model type: {model_type}")
             return None
 
-        # Compute additional metrics
-        predictions = predictions.flatten()
-        test_df['Predicted_Price'] = test_df['Close'] * (1 + predictions)
-        test_df['Actual_Price'] = test_df['Close'] * (1 + y_test)
-
-        progress.console.log(f"[{ticker}] Model MSE: {mse:.6f}")
-        avg_predicted_return = predictions.mean()
-        last_predicted_return = predictions[-1]
-        risk_adjusted_return = last_predicted_return / avg_volatility if avg_volatility != 0 else 0
-
-        progress.console.log(f"[{ticker}] Analysis complete.")
+        progress.console.log(
+            f"[{ticker}] MSE: {mse_val:.6f}, Risk-Adjusted Return: {risk_adjusted_return:.4f}"
+        )
         return {
-            "ticker": ticker,
-            "mse": mse,
-            "avg_predicted_return": avg_predicted_return,
-            "last_predicted_return": last_predicted_return,
-            "risk_adjusted_return": risk_adjusted_return,
-            "dates": data.iloc[-len(test_df):].index,
-            "predicted_prices": test_df['Predicted_Price'],
-            "actual_prices": test_df['Actual_Price']
+            "Ticker": ticker,
+            "MSE": mse_val,
+            "AvgPredReturn": float(last_return),
+            "Risk_Adjusted_Return": float(risk_adjusted_return),
         }
+
     except Exception as e:
         logger.error(f"[{ticker}] Error during analysis: {e}")
         return None
 
 
 def main(args: Any) -> None:
-    """Runs the live market scanner.
-
-    This function:
-    - Loads a list of stock tickers.
-    - Sets a dynamic date range.
-    - Runs stock analysis concurrently using multiple worker threads.
-    - Aggregates and logs the results.
-
-    Args:
-        args (Any): Command-line arguments.
-    """
+    """Runs the live market scanner with the 'main.py' style logic (tuning, training, etc.)."""
     end_date = datetime.today().strftime("%Y-%m-%d")
     start_date = (datetime.today() - timedelta(days=365 * 10)).strftime("%Y-%m-%d")
-    
+
     tickers = load_ticker_list("data/raw/market_tickers.csv")
-    logger.info(f"Scanning {len(tickers)} tickers from {start_date} to {end_date} using model: {args.model_type.upper()}.")
+    logger.info(
+        f"Scanning {len(tickers)} tickers from {start_date} to {end_date} using model: {args.model_type.upper()}."
+    )
 
     results: List[Dict[str, Any]] = []
-    with Progress(console=progress_console, transient=False) as progress:    
-        with concurrent.futures.ThreadPoolExecutor(max_workers=args.max_workers) as executor:
+    with Progress() as progress:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=args.max_workers
+        ) as executor:
             futures = {
-                executor.submit(analyze_stock, ticker, start_date, end_date, args.model_type, args.horizon, progress): ticker
+                executor.submit(
+                    analyze_stock,
+                    ticker,
+                    start_date,
+                    end_date,
+                    args.model_type,
+                    args.horizon,
+                    progress,
+                ): ticker
                 for ticker in tickers
             }
             task = progress.add_task("[blue]Scanning Market...", total=len(futures))
@@ -175,14 +175,26 @@ def main(args: Any) -> None:
         logger.error("No valid results obtained. Exiting...")
         return
 
-    summary = pd.DataFrame(results).sort_values(by="Risk_Adjusted_Return", ascending=False)
+    summary = pd.DataFrame(results).sort_values(
+        by="Risk_Adjusted_Return", ascending=False
+    )
     logger.info("Market scanning complete. Summary of results:")
-    print(summary.head(5))  # Print top stocks
+    logger.info(summary.head(5))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Live Market Scanner")
-    parser.add_argument("--model_type", type=str, default="lstm", help="Model type: rf, xgb, or lstm")
-    parser.add_argument("--horizon", type=int, default=20, help="Forecast horizon (days)")
-    parser.add_argument("--max_workers", type=int, default=8, help="Maximum number of concurrent workers")
+    parser.add_argument(
+        "--model_type", type=str, default="lstm", help="Model type: rf, xgb, or lstm"
+    )
+    parser.add_argument(
+        "--horizon", type=int, default=20, help="Forecast horizon (days)"
+    )
+    parser.add_argument(
+        "--max_workers",
+        type=int,
+        default=8,
+        help="Maximum number of concurrent workers",
+    )
     args = parser.parse_args()
     main(args)

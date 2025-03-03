@@ -1,10 +1,18 @@
+from typing import Optional
+
 import pandas as pd
 import yfinance as yf
 
-from typing import Optional
 from src.utils.logger import logger
 
-def fetch_stock_data(ticker: str, start_date: str, end_date: str, save_to_csv: bool = False, filename: Optional[str] = None) -> Optional[pd.DataFrame]:
+
+def fetch_stock_data(
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    save_to_csv: bool = False,
+    filename: Optional[str] = None,
+) -> Optional[pd.DataFrame]:
     """Fetch historical stock data for a given ticker symbol.
 
     This function retrieves historical stock data from Yahoo Finance between `start_date` and `end_date`.
@@ -25,7 +33,9 @@ def fetch_stock_data(ticker: str, start_date: str, end_date: str, save_to_csv: b
         Optional[pd.DataFrame]: A DataFrame containing historical stock prices, or None if fetching fails.
     """
     try:
-        logger.info(f"Fetching stock data for {ticker} from {start_date} to {end_date}...")
+        logger.info(
+            f"Fetching stock data for {ticker} from {start_date} to {end_date}..."
+        )
         data = yf.download(ticker, start=start_date, end=end_date, progress=False)
 
         # Check if data is empty
@@ -46,7 +56,11 @@ def fetch_stock_data(ticker: str, start_date: str, end_date: str, save_to_csv: b
 
         # Save data to CSV if required
         if save_to_csv:
-            filename = f"data/raw/{filename}" if filename else f"data/raw/{ticker}_stock_data.csv"
+            filename = (
+                f"data/raw/{filename}"
+                if filename
+                else f"data/raw/{ticker}_stock_data.csv"
+            )
             data.to_csv(filename)
             logger.info(f"Stock data saved to {filename}")
 
