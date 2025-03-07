@@ -63,6 +63,7 @@ def objective(
     y_train: torch.Tensor,
     data: np.ndarray,
     device: str,
+    num_epochs: int = 50,
 ) -> float:
     """Defines the hyperparameter search objective for Optuna.
 
@@ -106,7 +107,6 @@ def objective(
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    num_epochs = 50
     for epoch in range(num_epochs):
         model.train()
         total_loss = 0.0
@@ -137,7 +137,8 @@ def tune_lstm_hyperparameters(
     X_train: torch.Tensor,
     y_train: torch.Tensor,
     data: np.ndarray,
-    n_trials: int = 10,
+    n_trials: int = 5,
+    n_epochs=10,
     progress: Progress = None,
 ) -> Tuple[nn.Module, dict]:
     """Tunes LSTM hyperparameters using Optuna with a shared progress bar if provided.
@@ -170,12 +171,12 @@ def tune_lstm_hyperparameters(
 
     def wrapped_objective(trial):
         """Wrapper function for Optuna's objective function that updates progress."""
-        loss = objective(trial, X_train, y_train, data, device)
+        loss = objective(trial, X_train, y_train, data, device, num_epochs=n_epochs)
         progress.update(task, advance=1)
         return loss
 
     # Run hyperparameter optimization
-    study.optimize(wrapped_objective, n_trials=n_trials)
+    study.optimize(wrapped_objective, n_trials=n_trials, n_jobs=4)
 
     # Ensure the progress task shows 100% completion.
     progress.update(task, completed=n_trials)

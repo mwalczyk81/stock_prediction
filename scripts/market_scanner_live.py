@@ -1,5 +1,7 @@
 import argparse
 import concurrent.futures
+import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +17,14 @@ from src.models.lstm_tuner import tune_lstm_hyperparameters
 from src.models.random_forest import train_random_forest
 from src.models.xgboost_model import train_xgboost
 from src.utils.logger import logger
+
+
+@contextmanager
+def timer(name: str):
+    start = time.perf_counter()
+    yield
+    end = time.perf_counter()
+    print(f"[{name}] Elapsed time: {end - start:.2f} seconds")
 
 
 def load_ticker_list(filepath: str = "data/raw/market_tickers.csv") -> List[str]:
@@ -135,51 +145,54 @@ def analyze_stock(
 
 def main(args: Any) -> None:
     """Runs the live market scanner with the 'main.py' style logic (tuning, training, etc.)."""
-    end_date = datetime.today().strftime("%Y-%m-%d")
-    start_date = (datetime.today() - timedelta(days=365 * 10)).strftime("%Y-%m-%d")
+    with timer("Market Scanner"):
+        end_date = datetime.today().strftime("%Y-%m-%d")
+        start_date = (datetime.today() - timedelta(days=365 * 10)).strftime("%Y-%m-%d")
 
-    tickers = load_ticker_list("data/raw/market_tickers.csv")
-    logger.info(
-        f"Scanning {len(tickers)} tickers from {start_date} to {end_date} using model: {args.model_type.upper()}."
-    )
+        tickers = load_ticker_list("data/raw/market_tickers.csv")
+        logger.info(
+            f"Scanning {len(tickers)} tickers from {start_date} to {end_date} using model: {args.model_type.upper()}."
+        )
 
-    results: List[Dict[str, Any]] = []
-    with Progress() as progress:
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=args.max_workers
-        ) as executor:
-            futures = {
-                executor.submit(
-                    analyze_stock,
-                    ticker,
-                    start_date,
-                    end_date,
-                    args.model_type,
-                    args.horizon,
-                    progress,
-                ): ticker
-                for ticker in tickers
-            }
-            task = progress.add_task("[blue]Scanning Market...", total=len(futures))
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    result = future.result(timeout=180)
-                except Exception as e:
-                    logger.error(f"Ticker {futures[future]} timed out or errored: {e}")
-                    continue
-                if result is not None:
-                    results.append(result)
-                progress.advance(task)
+        results: List[Dict[str, Any]] = []
+        with Progress() as progress:
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=args.max_workers
+            ) as executor:
+                futures = {
+                    executor.submit(
+                        analyze_stock,
+                        ticker,
+                        start_date,
+                        end_date,
+                        args.model_type,
+                        args.horizon,
+                        progress,
+                    ): ticker
+                    for ticker in tickers
+                }
+                task = progress.add_task("[blue]Scanning Market...", total=len(futures))
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        result = future.result(timeout=180)
+                    except Exception as e:
+                        logger.error(
+                            f"Ticker {futures[future]} timed out or errored: {e}"
+                        )
+                        continue
+                    if result is not None:
+                        results.append(result)
+                    progress.advance(task)
 
-    if not results:
-        logger.error("No valid results obtained. Exiting...")
-        return
+        if not results:
+            logger.error("No valid results obtained. Exiting...")
+            return
 
-    summary = pd.DataFrame(results).sort_values(
-        by="Risk_Adjusted_Return", ascending=False
-    )
-    logger.info("Market scanning complete. Summary of results:")
-    logger.info(summary.head(5))
+        summary = pd.DataFrame(results).sort_values(
+            by="Risk_Adjusted_Return", ascending=False
+        )
+        logger.info("Market scanning complete. Summary of results:")
+        logger.info(summary.head(5))
 
 
 if __name__ == "__main__":

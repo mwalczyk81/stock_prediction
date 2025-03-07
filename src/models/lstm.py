@@ -138,18 +138,12 @@ def train_lstm_model(
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    early_stopping_patience = 5
+    # Initialize AMP's GradScaler for mixed precision
+    scaler = torch.GradScaler()
+
     best_loss = float("inf")
     patience_counter = 0
-
-    progress.console.log(f"Starting LSTM training for {epochs} epochs...")
-
-    own_progress = False
-    if progress is None:
-        progress = Progress()
-        progress.start()
-        own_progress = True
-    task = progress.add_task(f"[cyan]Training LSTM for {ticker}...", total=epochs)
+    early_stopping_patience = 5
 
     for epoch in range(epochs):
         model.train()
@@ -157,35 +151,41 @@ def train_lstm_model(
 
         for X_batch, y_batch in train_loader:
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-
             optimizer.zero_grad()
-            outputs = model(X_batch)
-            loss = criterion(outputs.view(-1, 1), y_batch.view(-1, 1))
-            loss.backward()
-            optimizer.step()
+
+            if device == "cuda":
+                with torch.autocast(device_type="cuda"):
+                    outputs = model(X_batch)
+                    loss = criterion(outputs.view(-1, 1), y_batch.view(-1, 1))
+            else:
+                outputs = model(X_batch)
+                loss = criterion(outputs.view(-1, 1), y_batch.view(-1, 1))
+
+            # Scale the loss and backpropagate
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
             total_loss += loss.item()
 
         avg_loss = total_loss / len(train_loader)
-        progress.update(task, advance=1)
+        if progress is not None:
+            progress.update(0, advance=1)  # Update your progress bar as needed
 
-        if epoch % 10 == 0:
-            progress.console.log(f"Epoch {epoch + 1}/{epochs} - Loss: {avg_loss:.6f}")
-
-        # Early Stopping Logic
+        # Early stopping logic
         if avg_loss < best_loss:
             best_loss = avg_loss
             patience_counter = 0
         else:
             patience_counter += 1
             if patience_counter >= early_stopping_patience:
-                progress.console.log("Early stopping triggered!")
+                if progress is not None:
+                    progress.console.log("Early stopping triggered!")
                 break
 
-    # Ensure the task is marked as complete even if early stopping was triggered.
-    progress.update(task, completed=epochs)
+        if progress is not None and epoch % 10 == 0:
+            progress.console.log(f"Epoch {epoch + 1}/{epochs} - Loss: {avg_loss:.6f}")
 
-    if own_progress:
-        progress.stop()
-
-    progress.console.log("LSTM training complete.")
+    if progress is not None:
+        progress.console.log("LSTM training complete.")
     return model
