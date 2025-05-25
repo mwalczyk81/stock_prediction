@@ -51,7 +51,7 @@ def load_or_fetch_data(ticker: str, start_date: str, end_date: str) -> pd.DataFr
 
 def train_model(
     model_type: str, features: pd.DataFrame, target: pd.Series, data, progress: Progress
-) -> Tuple[Any, pd.DataFrame, pd.Series, Any, float]:
+) -> Tuple[Any, pd.DataFrame, pd.Series, Any, float, float | None]:
     """Trains the selected model (Random Forest, XGBoost, or LSTM) with a progress bar.
 
     Args:
@@ -65,16 +65,16 @@ def train_model(
         ValueError: If an unsupported model type is specified.
 
     Returns:
-        Tuple[Any, pd.DataFrame, pd.Series, Any, float]: The trained model, test data, test labels, predictions, and MSE.
+        Tuple[Any, pd.DataFrame, pd.Series, Any, float, float | None]: The trained model, test data, test labels, predictions, MSE, and Sharpe Ratio (None for LSTM).
     """
-
+    sharpe_ratio = None  # Default for LSTM
     if model_type.lower() == "rf":
         logger.info("Training Random Forest model...")
-        model, X_test, y_test, predictions, mse = train_random_forest(features, target)
+        model, X_test, y_test, predictions, mse, sharpe_ratio = train_random_forest(features, target)
 
     elif model_type.lower() == "xgb":
         logger.info("Training XGBoost model...")
-        model, X_test, y_test, predictions, mse = train_xgboost(features, target)
+        model, X_test, y_test, predictions, mse, sharpe_ratio = train_xgboost(features, target)
 
     elif model_type.lower() == "lstm":
         logger.info("Preparing LSTM data...")
@@ -111,13 +111,13 @@ def train_model(
             predictions = best_model(X_test.to("cuda")).squeeze().cpu().numpy()
 
         mse = mean_squared_error(y_test.cpu(), predictions)
-        return best_model, X_test, y_test, predictions, mse
+        return best_model, X_test, y_test, predictions, mse, sharpe_ratio # Sharpe is None for LSTM
 
     else:
         logger.error(f"Unknown model type: {model_type}")
         raise ValueError(f"Unsupported model type: {model_type}")
 
-    return model, X_test, y_test, predictions, mse
+    return model, X_test, y_test, predictions, mse, sharpe_ratio
 
 
 def main(args: Any) -> None:
@@ -154,11 +154,16 @@ def main(args: Any) -> None:
 
         features, target = create_features_targets(data, horizon=horizon)
 
-        model, _, _, _, mse = train_model(model_type, features, target, data, progress)
+        model, _, _, _, mse, sharpe_ratio = train_model(model_type, features, target, data, progress)
 
-    logger.info(
-        f"{ticker} - {model_type.upper()} Model Training Completed. MSE: {mse:.6f}"
-    )
+    if model_type.lower() in ["rf", "xgb"]:
+        logger.info(
+            f"{ticker} - {model_type.upper()} Model Training Completed. MSE: {mse:.6f}, Sharpe Ratio: {sharpe_ratio:.2f}"
+        )
+    else: # LSTM or other models
+        logger.info(
+            f"{ticker} - {model_type.upper()} Model Training Completed. MSE: {mse:.6f}"
+        )
     current_price = data["Close"].iloc[-1]
 
     # **Forecasting Logic**

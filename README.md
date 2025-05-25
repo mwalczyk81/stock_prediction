@@ -86,9 +86,13 @@ The project currently predicts a multi-day return (default is 5 days). You can a
 
 **Feature Engineering:**  
 The preprocessing pipeline includes:
-- Technical indicators (SMA, EMA, RSI)
-- Lag features
-- Volatility (rolling standard deviation)
+- Technical indicators:
+    - SMA (Simple Moving Average)
+    - EMA (Exponential Moving Average)
+    - RSI (Relative Strength Index)
+    - MACD (Moving Average Convergence Divergence): Includes the MACD line, its signal line, and the MACD histogram (difference). These are useful for identifying trend direction and momentum.
+- Lag features (e.g., previous day's close price, previous returns)
+- Volatility (rolling standard deviation of returns)
 - Momentum (percentage change over a set period)
 
 Feel free to add or modify features to better suit your strategy.
@@ -98,6 +102,16 @@ The market scanner computes a risk-adjusted return (predicted return divided by 
 
 **Visualization:**  
 Plotting functions are available in `src/utils/visualization.py`. You can customize how results are displayed or save plots to files if preferred.
+
+## Evaluation Metrics
+
+To better assess model performance beyond standard metrics like Mean Squared Error (MSE), the following has been incorporated:
+
+- **Sharpe Ratio**:
+    - Calculated for the Random Forest and XGBoost models based on their predictions on the test set.
+    - The Sharpe Ratio measures the risk-adjusted return of the model's predictions. It is calculated by taking the average predicted (excess) return and dividing it by the standard deviation of those predicted returns, then annualizing it.
+    - A higher Sharpe Ratio generally indicates a better risk-adjusted performance. This helps in understanding if the model's predicted returns are a result of excessive risk or sound predictions.
+    - This metric is logged during model training and can be used to compare different models or hyperparameter settings from a risk-adjusted perspective.
 
 ## Testing
 
