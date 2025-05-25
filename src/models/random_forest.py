@@ -1,7 +1,7 @@
 import logging
 import time
 from typing import Tuple
-
+import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
@@ -10,7 +10,7 @@ from sklearn.model_selection import GridSearchCV, TimeSeriesSplit, train_test_sp
 
 def train_random_forest(
     X: pd.DataFrame, y: pd.Series, test_size: float = 0.2, random_state: int = 42
-) -> Tuple[RandomForestRegressor, pd.DataFrame, pd.Series, pd.Series, float]:
+) -> Tuple[RandomForestRegressor, pd.DataFrame, pd.Series, pd.Series, float, float]:
     """
     Trains a RandomForestRegressor using TimeSeriesSplit for hyperparameter tuning.
 
@@ -20,6 +20,7 @@ def train_random_forest(
       - y_test: Test set target values.
       - predictions: Model predictions for the test set.
       - mse: Mean Squared Error on the test set.
+      - sharpe_ratio: Calculated Sharpe Ratio from predictions.
     """
     # Split data without shuffling to preserve time order.
     X_train, X_test, y_train, y_test = train_test_split(
@@ -60,4 +61,14 @@ def train_random_forest(
     predictions = best_model.predict(X_test)
     mse = mean_squared_error(y_test, predictions)
 
-    return best_model, X_test, y_test, predictions, mse
+    # Ensure predictions is a pd.Series for Sharpe Ratio calculation
+    if isinstance(predictions, np.ndarray):
+        predictions_series = pd.Series(predictions, index=y_test.index)
+    else:
+        predictions_series = predictions # Assuming it's already a Series if not ndarray
+
+    # Calculate Sharpe Ratio using the utility function
+    from src.utils.metrics import calculate_sharpe_ratio # Local import to avoid circular dependency issues if metrics grows
+    sharpe_ratio = calculate_sharpe_ratio(predictions_series)
+
+    return best_model, X_test, y_test, predictions, mse, sharpe_ratio

@@ -1,4 +1,5 @@
 import pandas as pd
+import ta
 
 
 def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
@@ -88,8 +89,12 @@ def add_macd(df: pd.DataFrame) -> pd.DataFrame:
     df["EMA12"] = df["Close"].ewm(span=12, adjust=False).mean()
     df["EMA26"] = df["Close"].ewm(span=26, adjust=False).mean()
     df["MACD"] = df["EMA12"] - df["EMA26"]
-    df["Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
-    df.drop(columns=["EMA12", "EMA26"], inplace=True)
+    # Calculate MACD using ta library
+    macd_indicator = ta.trend.MACD(df["Close"])
+    df["MACD"] = macd_indicator.macd()
+    df["Signal"] = macd_indicator.macd_signal()
+    df["MACD_diff"] = macd_indicator.macd_diff()
+    # df.drop(columns=["EMA12", "EMA26"], inplace=True) # These columns are not created when using ta
     return df
 
 
@@ -154,6 +159,7 @@ def create_features_targets(
             "Momentum",
             "MACD",
             "Signal",
+            "MACD_diff",
         ]
     ]
 
