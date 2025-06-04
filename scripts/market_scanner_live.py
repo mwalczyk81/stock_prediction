@@ -73,13 +73,23 @@ def analyze_stock(
         if model_type.lower() in ["rf", "xgb"]:
             # For example, re-use your existing train_random_forest() or train_xgboost() from main.py
             if model_type.lower() == "rf":
-                model, X_test, y_test, predictions, mse_val = train_random_forest(
-                    features, target
-                )
+                (
+                    model,
+                    X_test,
+                    y_test,
+                    predictions,
+                    mse_val,
+                    sharpe_ratio,
+                ) = train_random_forest(features, target)
             else:
-                model, X_test, y_test, predictions, mse_val = train_xgboost(
-                    features, target
-                )
+                (
+                    model,
+                    X_test,
+                    y_test,
+                    predictions,
+                    mse_val,
+                    sharpe_ratio,
+                ) = train_xgboost(features, target)
 
             # Suppose we just do last predictions from X_test
             # (You could do a “forward forecast” if you want.)
