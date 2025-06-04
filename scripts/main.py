@@ -70,11 +70,15 @@ def train_model(
     sharpe_ratio = None  # Default for LSTM
     if model_type.lower() == "rf":
         logger.info("Training Random Forest model...")
-        model, X_test, y_test, predictions, mse, sharpe_ratio = train_random_forest(features, target)
+        model, X_test, y_test, predictions, mse, sharpe_ratio = train_random_forest(
+            features, target
+        )
 
     elif model_type.lower() == "xgb":
         logger.info("Training XGBoost model...")
-        model, X_test, y_test, predictions, mse, sharpe_ratio = train_xgboost(features, target)
+        model, X_test, y_test, predictions, mse, sharpe_ratio = train_xgboost(
+            features, target
+        )
 
     elif model_type.lower() == "lstm":
         logger.info("Preparing LSTM data...")
@@ -111,7 +115,14 @@ def train_model(
             predictions = best_model(X_test.to("cuda")).squeeze().cpu().numpy()
 
         mse = mean_squared_error(y_test.cpu(), predictions)
-        return best_model, X_test, y_test, predictions, mse, sharpe_ratio # Sharpe is None for LSTM
+        return (
+            best_model,
+            X_test,
+            y_test,
+            predictions,
+            mse,
+            sharpe_ratio,
+        )  # Sharpe is None for LSTM
 
     else:
         logger.error(f"Unknown model type: {model_type}")
@@ -154,19 +165,22 @@ def main(args: Any) -> None:
 
         features, target = create_features_targets(data, horizon=horizon)
 
-        model, _, _, _, mse, sharpe_ratio = train_model(model_type, features, target, data, progress)
+        model, _, _, _, mse, sharpe_ratio = train_model(
+            model_type, features, target, data, progress
+        )
 
     if model_type.lower() in ["rf", "xgb"]:
         logger.info(
             f"{ticker} - {model_type.upper()} Model Training Completed. MSE: {mse:.6f}, Sharpe Ratio: {sharpe_ratio:.2f}"
         )
-    else: # LSTM or other models
+    else:  # LSTM or other models
         logger.info(
             f"{ticker} - {model_type.upper()} Model Training Completed. MSE: {mse:.6f}"
         )
     current_price = data["Close"].iloc[-1]
 
     # **Forecasting Logic**
+    mean_return = std_return = mean_price = std_price = 0.0
     if forecast_steps > 0:
         logger.info(f"Performing {forecast_steps}-step forward forecast...")
         if model_type.lower() == "lstm":
@@ -195,6 +209,10 @@ def main(args: Any) -> None:
         else:
             if forecast_steps == 1:
                 pred_return, pred_price = forecast_one_step(model, data, horizon)
+                mean_return = float(pred_return)
+                std_return = 0.0
+                mean_price = float(pred_price)
+                std_price = 0.0
             else:
                 forecasts = forecast_multi_step(model, data, horizon, forecast_steps)
                 for forecast in forecasts:
@@ -210,6 +228,10 @@ def main(args: Any) -> None:
             if model_type.lower() == "lstm"
             else forecast_one_step(model, data, horizon)
         )
+        mean_return = float(pred_return)
+        std_return = 0.0
+        mean_price = float(pred_price)
+        std_price = 0.0
 
     logger.info(
         f"Forward Forecast for {ticker} ({model_type.upper()}): Current price = {current_price:.2f}, Predicted return over {horizon} days = {mean_return:.4f} ± {std_return}, Predicted price = {mean_price:.2f} ± {std_price}"
